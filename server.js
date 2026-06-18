@@ -20,6 +20,14 @@ const HTTP_TIMEOUT = 15000
 const CACHE_DIR = path.join(__dirname, 'cache')
 if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true })
 
+const requestLog = []
+
+function logRequest(type, id, extra, result) {
+  const entry = { t: Date.now(), type, id, extra: extra ? { vh: !!extra.videoHash, vs: !!extra.videoSize, fn: extra.filename } : null, r: result }
+  requestLog.push(entry)
+  if (requestLog.length > 50) requestLog.shift()
+}
+
 function cacheKey(videoId, lang) {
   return crypto.createHash('md5').update(`${videoId}-${lang}`).digest('hex')
 }
@@ -125,18 +133,19 @@ const builder = new addonBuilder(manifest)
 
 builder.defineSubtitlesHandler(async ({ type, id, extra }) => {
   const { targetLang, llmApiKey, llmApiBase, llmModel, subsApiKey } = CONFIG
-  if (!llmApiKey) { console.log('[sub] no LLM key'); return { subtitles: [], cacheMaxAge: 3600 } }
+  if (!llmApiKey) { logRequest(type, id, extra, 'no_key'); return { subtitles: [], cacheMaxAge: 3600 } }
 
   const key = cacheKey(id, targetLang)
   const cacheFile = path.join(CACHE_DIR, `${key}.srt`)
   if (fs.existsSync(cacheFile)) {
+    logRequest(type, id, extra, 'cache_hit')
     return { subtitles: [{ id: `${key}-${targetLang}`, url: `${PUBLIC_URL}/srt/${key}.vtt`, lang: targetLang }], cacheMaxAge: 86400 * 30 }
   }
 
   try {
     let sourceSrt = null
     const imdbId = extractImdbId(id)
-    console.log(`[sub] req: type=${type} id=${id} imdb=${imdbId}`)
+    console.log(`[sub] req: type=${type} id=${id} imdb=${imdbId} hash=${!!extra?.videoHash} size=${!!extra?.videoSize}`)
 
     if (subsApiKey) {
       if (extra?.videoHash && extra?.videoSize) {
@@ -148,18 +157,20 @@ builder.defineSubtitlesHandler(async ({ type, id, extra }) => {
     }
 
     if (!sourceSrt) {
-      console.log(`[sub] no source sub found for ${id}`)
+      console.log(`[sub] no source for ${id}`)
+      logRequest(type, id, extra, 'no_source')
       return { subtitles: [], cacheMaxAge: 7200 }
     }
 
     console.log(`[sub] translating ${sourceSrt.length} chars...`)
     const translated = await translateSrt(sourceSrt, targetLang, llmApiKey, llmApiBase, llmModel)
-    if (!translated) return { subtitles: [], cacheMaxAge: 3600 }
+    if (!translated) { logRequest(type, id, extra, 'trans_fail'); return { subtitles: [], cacheMaxAge: 3600 } }
     fs.writeFileSync(cacheFile, translated, 'utf-8')
-    console.log(`[sub] done: ${key}`)
+    logRequest(type, id, extra, 'ok')
     return { subtitles: [{ id: `${key}-${targetLang}`, url: `${PUBLIC_URL}/srt/${key}.vtt`, lang: targetLang }], cacheMaxAge: 86400 * 30 }
   } catch (err) {
     console.error('[sub] error:', err)
+    logRequest(type, id, extra, 'error')
     return { subtitles: [], cacheMaxAge: 3600 }
   }
 })
@@ -181,6 +192,7 @@ app.get('/debug', (_, res) => {
   res.end(`<!DOCTYPE html>
 <html><body style="font-family:sans-serif;padding:20px">
 <h2>Debug</h2>
+<p><a href="/debug/requests" target="_blank">查看最近请求日志</a></p>
 <form action="/debug/search" method="get" target="_blank">
   <p>IMDb: <input name="id" placeholder="tt1375666" size="30">
   <button>Search subs</button></p>
@@ -190,6 +202,14 @@ app.get('/debug', (_, res) => {
   <button>Search + Translate</button></p>
 </form>
 </body></html>`)
+})
+
+app.get('/debug/requests', (_, res) => {
+  res.setHeader('content-type', 'text/plain; charset=utf-8')
+  if (requestLog.length === 0) return res.end('no requests yet\n')
+  res.end(requestLog.map(e =>
+    `[${new Date(e.t).toISOString()}] type=${e.type} id=${e.id} result=${e.r} extra=${JSON.stringify(e.extra)}`
+  ).join('\n') + '\n')
 })
 
 app.get('/debug/search', async (req, res) => {
