@@ -2,6 +2,7 @@
 // 支持 OpenAI 兼容接口（DeepSeek / Moonshot / Ollama 等）
 
 const { addonBuilder, getRouter } = require('stremio-addon-sdk')
+const landingTemplate = require('stremio-addon-sdk/src/landingTemplate')
 const express = require('express')
 const crypto = require('crypto')
 const fs = require('fs')
@@ -190,6 +191,14 @@ builder.defineSubtitlesHandler(async ({ type, id, extra, config }) => {
 
 // ---------- Express 服务器 ----------
 const app = express()
+
+// Landing page with config form (auto-redirect to /configure)
+const landingHtml = landingTemplate(manifest)
+app.get('/', (_, res) => res.redirect('/configure'))
+app.get('/configure', (_, res) => {
+  res.setHeader('content-type', 'text/html')
+  res.end(landingHtml)
+})
 
 // 提供翻译后的字幕文件（SRT → VTT）
 app.get('/srt/:key.vtt', (req, res) => {
