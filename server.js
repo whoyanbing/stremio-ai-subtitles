@@ -120,6 +120,7 @@ const manifest = {
   catalogs: [],
   resources: ['subtitles'],
   types: ['movie', 'series'],
+  idPrefixes: ['tt'],
 }
 
 const builder = new addonBuilder(manifest)
