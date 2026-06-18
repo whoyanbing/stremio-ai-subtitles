@@ -164,7 +164,7 @@ app.get('/srt/:key.vtt', (req, res) => {
 app.get('/health', (_, res) => res.json({ ok: true, cacheSize: fs.readdirSync(CACHE_DIR).length }))
 
 app.get('/debug', (_, res) => {
-  res.setHeader('content-type', 'text/html')
+  res.setHeader('content-type', 'text/html; charset=utf-8')
   res.end(`<!DOCTYPE html>
 <html><body style="font-family:sans-serif;padding:20px">
 <h2>AI 字幕翻译 - 调试</h2>
@@ -183,7 +183,7 @@ app.get('/debug', (_, res) => {
 })
 
 app.get('/debug/test', async (req, res) => {
-  res.setHeader('content-type', 'text/plain')
+  res.setHeader('content-type', 'text/plain; charset=utf-8')
   const imdbId = req.query.id
   if (!imdbId) return res.end('请输入 IMDb ID')
   res.write(`测试 IMDb ID: ${imdbId}\n\n`)
