@@ -9,11 +9,11 @@ const PUBLIC_URL = process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN 
 
 // ===== 在这里配置你的 API Key =====
 const CONFIG = {
-  llmApiKey: 'your-deepseek-api-key-here',
-  llmApiBase: 'https://api.deepseek.com',
-  llmModel: 'deepseek-chat',
+  llmApiKey: 'sk-OdCLwCMk87oNeMpgbJpnjgdEMpBcoi7Z',
+  llmApiBase: 'https://token.sensenova.cn/v1',
+  llmModel: 'deepseek-v4-flash',
   targetLang: '简体中文',
-  subsApiKey: 'your-opensubtitles-api-key-here',
+  subsApiKey: 'StsEHnr7VCueKUGTaoLwRO0ActwtvQMu',
 }
 // =================================
 
