@@ -11,7 +11,8 @@ const CONFIG = {
   llmApiKey: 'sk-OdCLwCMk87oNeMpgbJpnjgdEMpBcoi7Z',
   llmApiBase: 'https://token.sensenova.cn/v1',
   llmModel: 'deepseek-v4-flash',
-  targetLang: 'Simplified Chinese',
+  lang: 'chi',
+  targetLangName: 'Chinese',
   subsApiKey: 'StsEHnr7VCueKUGTaoLwRO0ActwtvQMu',
 }
 
@@ -126,20 +127,19 @@ const manifest = {
   catalogs: [],
   resources: ['subtitles'],
   types: ['movie', 'series'],
-  idPrefixes: ['tt'],
 }
 
 const builder = new addonBuilder(manifest)
 
 builder.defineSubtitlesHandler(async ({ type, id, extra }) => {
-  const { targetLang, llmApiKey, llmApiBase, llmModel, subsApiKey } = CONFIG
+  const { lang, targetLangName, llmApiKey, llmApiBase, llmModel, subsApiKey } = CONFIG
   if (!llmApiKey) { logRequest(type, id, extra, 'no_key'); return { subtitles: [], cacheMaxAge: 3600 } }
 
-  const key = cacheKey(id, targetLang)
+  const key = cacheKey(id, lang)
   const cacheFile = path.join(CACHE_DIR, `${key}.srt`)
   if (fs.existsSync(cacheFile)) {
     logRequest(type, id, extra, 'cache_hit')
-    return { subtitles: [{ id: `${key}-${targetLang}`, url: `${PUBLIC_URL}/srt/${key}.vtt`, lang: targetLang }], cacheMaxAge: 86400 * 30 }
+    return { subtitles: [{ id: `${key}-${lang}`, url: `${PUBLIC_URL}/srt/${key}.vtt`, lang }], cacheMaxAge: 86400 * 30 }
   }
 
   try {
@@ -163,11 +163,11 @@ builder.defineSubtitlesHandler(async ({ type, id, extra }) => {
     }
 
     console.log(`[sub] translating ${sourceSrt.length} chars...`)
-    const translated = await translateSrt(sourceSrt, targetLang, llmApiKey, llmApiBase, llmModel)
+    const translated = await translateSrt(sourceSrt, targetLangName, llmApiKey, llmApiBase, llmModel)
     if (!translated) { logRequest(type, id, extra, 'trans_fail'); return { subtitles: [], cacheMaxAge: 3600 } }
     fs.writeFileSync(cacheFile, translated, 'utf-8')
     logRequest(type, id, extra, 'ok')
-    return { subtitles: [{ id: `${key}-${targetLang}`, url: `${PUBLIC_URL}/srt/${key}.vtt`, lang: targetLang }], cacheMaxAge: 86400 * 30 }
+    return { subtitles: [{ id: `${key}-${lang}`, url: `${PUBLIC_URL}/srt/${key}.vtt`, lang }], cacheMaxAge: 86400 * 30 }
   } catch (err) {
     console.error('[sub] error:', err)
     logRequest(type, id, extra, 'error')
@@ -230,7 +230,7 @@ app.get('/debug/translate', async (req, res) => {
   try {
     const srt = await fetchSubsByImdbId(id, CONFIG.subsApiKey)
     if (!srt) return res.end('no subs found\n')
-    const t = await translateSrt(srt.slice(0, 500), CONFIG.targetLang, CONFIG.llmApiKey, CONFIG.llmApiBase, CONFIG.llmModel)
+    const t = await translateSrt(srt.slice(0, 500), CONFIG.targetLangName, CONFIG.llmApiKey, CONFIG.llmApiBase, CONFIG.llmModel)
     res.end(`ok\n${t}\n`)
   } catch (e) { res.end(`error: ${e.message}\n`) }
 })
