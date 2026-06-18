@@ -126,7 +126,15 @@ const builder = new addonBuilder(manifest)
 
 builder.defineSubtitlesHandler(async ({ type, id, extra }) => {
   const { targetLang, llmApiKey, llmApiBase, llmModel, subsApiKey } = CONFIG
-  if (!llmApiKey) { console.log('[llm-subtitle] 无 LLM Key'); return { subtitles: [], cacheMaxAge: 3600 } }
+
+  // 先返回一条测试字幕，确认 Stremio 是否调用了我们
+  const testKey = cacheKey('test', targetLang)
+  const testFile = path.join(CACHE_DIR, `${testKey}.srt`)
+  if (!fs.existsSync(testFile)) {
+    fs.writeFileSync(testFile, `1\n00:00:01,000 --> 00:00:05,000\n测试字幕 - 插件正常运行\n2\n00:00:06,000 --> 00:00:10,000\nTest subtitle - addon is working`, 'utf-8')
+  }
+
+  if (!llmApiKey) { console.log('[llm-subtitle] 无 LLM Key'); return { subtitles: [{ id: testKey, url: `${PUBLIC_URL}/srt/${testKey}.vtt`, lang: targetLang }], cacheMaxAge: 3600 } }
 
   const key = cacheKey(id, targetLang)
   const cacheFile = path.join(CACHE_DIR, `${key}.srt`)
@@ -148,7 +156,10 @@ builder.defineSubtitlesHandler(async ({ type, id, extra }) => {
       }
     }
 
-    if (!sourceSrt) { console.log(`[llm-subtitle] 无源字幕`); return { subtitles: [], cacheMaxAge: 7200 } }
+    if (!sourceSrt) {
+      console.log(`[llm-subtitle] 无源字幕，返回测试字幕`)
+      return { subtitles: [{ id: testKey, url: `${PUBLIC_URL}/srt/${testKey}.vtt`, lang: targetLang }], cacheMaxAge: 7200 }
+    }
 
     const translated = await translateSrt(sourceSrt, targetLang, llmApiKey, llmApiBase, llmModel)
     if (!translated) return { subtitles: [], cacheMaxAge: 3600 }
@@ -157,7 +168,7 @@ builder.defineSubtitlesHandler(async ({ type, id, extra }) => {
     return { subtitles: [{ id: `${key}-${targetLang}`, url: `${PUBLIC_URL}/srt/${key}.vtt`, lang: targetLang }], cacheMaxAge: 86400 * 30 }
   } catch (err) {
     console.error('[llm-subtitle] 错误:', err)
-    return { subtitles: [], cacheMaxAge: 3600 }
+    return { subtitles: [{ id: testKey, url: `${PUBLIC_URL}/srt/${testKey}.vtt`, lang: targetLang }], cacheMaxAge: 3600 }
   }
 })
 
