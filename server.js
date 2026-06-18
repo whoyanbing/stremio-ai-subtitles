@@ -11,7 +11,7 @@ const CONFIG = {
   llmApiKey: 'sk-OdCLwCMk87oNeMpgbJpnjgdEMpBcoi7Z',
   llmApiBase: 'https://token.sensenova.cn/v1',
   llmModel: 'deepseek-v4-flash',
-  targetLang: '简体中文',
+  targetLang: 'Simplified Chinese',
   subsApiKey: 'StsEHnr7VCueKUGTaoLwRO0ActwtvQMu',
 }
 
@@ -34,8 +34,7 @@ async function fetchWithTimeout(url, opts = {}, timeout = HTTP_TIMEOUT) {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeout)
   try {
-    const res = await fetch(url, { ...opts, signal: ctrl.signal })
-    return res
+    return await fetch(url, { ...opts, signal: ctrl.signal })
   } finally {
     clearTimeout(timer)
   }
@@ -70,17 +69,17 @@ async function fetchSubsByImdbId(imdbId, apiKey) {
     `https://api.opensubtitles.com/api/v1/subtitles?imdb_id=${num}&order_by=download_count&sublanguage_id=all`,
     { headers: { 'Api-Key': apiKey, 'User-Agent': 'LLMSubtitleAddon v1.0' } }
   )
-  if (!res.ok) { console.log(`[llm-subtitle] OS search 失败: ${res.status}`); return null }
+  if (!res.ok) { console.log(`[os] search fail: ${res.status}`); return null }
   const data = await res.json()
   const sub = data?.data?.[0]?.attributes
-  if (!sub?.files?.[0]?.file_id) { console.log(`[llm-subtitle] OS 无结果: ${data?.data?.length}`); return null }
-  console.log(`[llm-subtitle] OS 命中: lang=${sub.language} fid=${sub.files[0].file_id}`)
+  if (!sub?.files?.[0]?.file_id) { console.log(`[os] no result: ${data?.data?.length}`); return null }
+  console.log(`[os] hit: lang=${sub.language} fid=${sub.files[0].file_id}`)
   const dl = await fetchWithTimeout('https://api.opensubtitles.com/api/v1/download', {
     method: 'POST',
     headers: { 'Api-Key': apiKey, 'Content-Type': 'application/json', 'User-Agent': 'LLMSubtitleAddon v1.0' },
     body: JSON.stringify({ file_id: sub.files[0].file_id }),
   })
-  if (!dl.ok) { console.log(`[llm-subtitle] OS dl 失败: ${dl.status}`); return null }
+  if (!dl.ok) { console.log(`[os] dl fail: ${dl.status}`); return null }
   const dlData = await dl.json()
   if (!dlData.link) return null
   const srtRes = await fetchWithTimeout(dlData.link)
@@ -88,10 +87,9 @@ async function fetchSubsByImdbId(imdbId, apiKey) {
 }
 
 async function translateSrt(sourceSrt, targetLang, apiKey, apiBase, model) {
-  const prompt = `你是一个专业字幕翻译专家。将以下SRT格式的字幕翻译成${targetLang}。
-严格保持SRT格式不变（时间轴、序号），只翻译文本内容。
-确保翻译自然流畅，符合${targetLang}表达习惯。
-完整返回全部字幕内容：
+  const prompt = `Translate the following SRT subtitle to ${targetLang}.
+Keep the SRT format exactly (timestamps, sequence numbers). Only translate the text.
+Return ALL subtitles:
 
 ${sourceSrt}`
   const base = (apiBase || 'https://api.openai.com/v1').replace(/\/+$/, '')
@@ -105,10 +103,10 @@ ${sourceSrt}`
       max_tokens: 16384,
     }),
   }, 60000)
-  if (!res.ok) throw new Error(`LLM API ${res.status}: ${await res.text()}`)
+  if (!res.ok) throw new Error(`LLM ${res.status}: ${await res.text()}`)
   const data = await res.json()
   const content = data.choices?.[0]?.message?.content
-  if (!content) throw new Error(`LLM 返回异常: ${JSON.stringify(data)}`)
+  if (!content) throw new Error(`LLM bad response: ${JSON.stringify(data)}`)
   return content
 }
 
@@ -116,7 +114,7 @@ const manifest = {
   id: 'org.example.llm-subtitles',
   version: '1.0.0',
   name: 'AI 字幕翻译',
-  description: '使用大模型自动翻译字幕',
+  description: 'AI-powered subtitle translation',
   catalogs: [],
   resources: ['subtitles'],
   types: ['movie', 'series'],
@@ -127,15 +125,7 @@ const builder = new addonBuilder(manifest)
 
 builder.defineSubtitlesHandler(async ({ type, id, extra }) => {
   const { targetLang, llmApiKey, llmApiBase, llmModel, subsApiKey } = CONFIG
-
-  // 先返回一条测试字幕，确认 Stremio 是否调用了我们
-  const testKey = cacheKey('test', targetLang)
-  const testFile = path.join(CACHE_DIR, `${testKey}.srt`)
-  if (!fs.existsSync(testFile)) {
-    fs.writeFileSync(testFile, `1\n00:00:01,000 --> 00:00:05,000\n测试字幕 - 插件正常运行\n2\n00:00:06,000 --> 00:00:10,000\nTest subtitle - addon is working`, 'utf-8')
-  }
-
-  if (!llmApiKey) { console.log('[llm-subtitle] 无 LLM Key'); return { subtitles: [{ id: testKey, url: `${PUBLIC_URL}/srt/${testKey}.vtt`, lang: targetLang }], cacheMaxAge: 3600 } }
+  if (!llmApiKey) { console.log('[sub] no LLM key'); return { subtitles: [], cacheMaxAge: 3600 } }
 
   const key = cacheKey(id, targetLang)
   const cacheFile = path.join(CACHE_DIR, `${key}.srt`)
@@ -146,7 +136,7 @@ builder.defineSubtitlesHandler(async ({ type, id, extra }) => {
   try {
     let sourceSrt = null
     const imdbId = extractImdbId(id)
-    console.log(`[llm-subtitle] 请求: type=${type} id=${id} imdbId=${imdbId}`)
+    console.log(`[sub] req: type=${type} id=${id} imdb=${imdbId}`)
 
     if (subsApiKey) {
       if (extra?.videoHash && extra?.videoSize) {
@@ -158,18 +148,19 @@ builder.defineSubtitlesHandler(async ({ type, id, extra }) => {
     }
 
     if (!sourceSrt) {
-      console.log(`[llm-subtitle] 无源字幕，返回测试字幕`)
-      return { subtitles: [{ id: testKey, url: `${PUBLIC_URL}/srt/${testKey}.vtt`, lang: targetLang }], cacheMaxAge: 7200 }
+      console.log(`[sub] no source sub found for ${id}`)
+      return { subtitles: [], cacheMaxAge: 7200 }
     }
 
+    console.log(`[sub] translating ${sourceSrt.length} chars...`)
     const translated = await translateSrt(sourceSrt, targetLang, llmApiKey, llmApiBase, llmModel)
     if (!translated) return { subtitles: [], cacheMaxAge: 3600 }
     fs.writeFileSync(cacheFile, translated, 'utf-8')
-    console.log(`[llm-subtitle] 完成: ${key}`)
+    console.log(`[sub] done: ${key}`)
     return { subtitles: [{ id: `${key}-${targetLang}`, url: `${PUBLIC_URL}/srt/${key}.vtt`, lang: targetLang }], cacheMaxAge: 86400 * 30 }
   } catch (err) {
-    console.error('[llm-subtitle] 错误:', err)
-    return { subtitles: [{ id: testKey, url: `${PUBLIC_URL}/srt/${testKey}.vtt`, lang: targetLang }], cacheMaxAge: 3600 }
+    console.error('[sub] error:', err)
+    return { subtitles: [], cacheMaxAge: 3600 }
   }
 })
 
@@ -189,77 +180,41 @@ app.get('/debug', (_, res) => {
   res.setHeader('content-type', 'text/html; charset=utf-8')
   res.end(`<!DOCTYPE html>
 <html><body style="font-family:sans-serif;padding:20px">
-<h2>AI 字幕翻译 - 调试</h2>
-<form action="/debug/test" method="get" target="_blank">
-  <p>IMDb ID: <input name="id" placeholder="tt1375666" size="30">
-  <button type="submit">测试</button></p>
-</form>
-<p>先测试 OpenSubtitles 搜索（不调用 LLM）：</p>
+<h2>Debug</h2>
 <form action="/debug/search" method="get" target="_blank">
-  <p>IMDb ID: <input name="id" placeholder="tt1375666" size="30">
-  <button type="submit">仅搜索字幕</button></p>
+  <p>IMDb: <input name="id" placeholder="tt1375666" size="30">
+  <button>Search subs</button></p>
 </form>
-<ul>
-  <li>LLM: ${CONFIG.llmApiKey ? CONFIG.llmApiKey.slice(0, 8) + '...' : '无'}
-  <li>OpenSubtitles: ${CONFIG.subsApiKey ? CONFIG.subsApiKey.slice(0, 8) + '...' : '无'}
-  <li>API Base: ${CONFIG.llmApiBase}
-  <li>Model: ${CONFIG.llmModel}
-</ul>
+<form action="/debug/translate" method="get" target="_blank">
+  <p>IMDb: <input name="id" placeholder="tt1375666" size="30">
+  <button>Search + Translate</button></p>
+</form>
 </body></html>`)
 })
 
 app.get('/debug/search', async (req, res) => {
   res.setHeader('content-type', 'text/plain; charset=utf-8')
-  const imdbId = req.query.id
-  if (!imdbId) return res.end('missing id')
-  res.write(`搜索字幕: ${imdbId}\n`)
-  if (!CONFIG.subsApiKey) return res.end('无 OpenSubtitles Key\n')
+  const id = req.query.id
+  if (!id || !CONFIG.subsApiKey) return res.end('missing id or key\n')
   try {
-    const srt = await fetchSubsByImdbId(imdbId, CONFIG.subsApiKey)
-    if (srt) res.end(`找到! ${srt.length} 字符\n---前300---\n${srt.slice(0, 300)}\n`)
-    else res.end('未找到字幕\n')
-  } catch (e) {
-    res.end(`错误: ${e.message}\n`)
-  }
+    const srt = await fetchSubsByImdbId(id, CONFIG.subsApiKey)
+    if (srt) res.end(`found ${srt.length} chars\n${srt.slice(0, 300)}\n`)
+    else res.end('not found\n')
+  } catch (e) { res.end(`error: ${e.message}\n`) }
 })
 
-app.get('/debug/test', async (req, res) => {
+app.get('/debug/translate', async (req, res) => {
   res.setHeader('content-type', 'text/plain; charset=utf-8')
-  res.setHeader('Transfer-Encoding', 'chunked')
-  const imdbId = req.query.id
-  if (!imdbId) return res.end('missing id\n')
-
-  res.write(`测试: ${imdbId}\n\n`)
-
-  if (!CONFIG.subsApiKey) { res.write('无 OpenSubtitles Key\n'); return res.end() }
-  if (!CONFIG.llmApiKey) { res.write('无 LLM Key\n'); return res.end() }
-
-  res.write('[1] 搜索 OpenSubtitles...\n')
+  const id = req.query.id
+  if (!id) return res.end('missing id\n')
   try {
-    const start = Date.now()
-    const srt = await fetchSubsByImdbId(imdbId, CONFIG.subsApiKey)
-    res.write(`  耗时: ${Date.now() - start}ms\n`)
-    if (!srt) { res.write('  未找到字幕\n'); return res.end() }
-    res.write(`  找到! ${srt.length} 字符\n\n`)
-  } catch (e) { res.write(`  ❌ ${e.message}\n`); return res.end() }
-
-  res.write('[2] LLM 翻译...\n')
-  try {
-    const start = Date.now()
-    const translated = await translateSrt(
-      '1\n00:00:01,000 --> 00:00:05,000\nHello world, this is a test subtitle.\n\n2\n00:00:06,000 --> 00:00:10,000\nThis is the second line of the test.',
-      CONFIG.targetLang, CONFIG.llmApiKey, CONFIG.llmApiBase, CONFIG.llmModel
-    )
-    res.write(`  耗时: ${Date.now() - start}ms\n`)
-    if (translated) res.write(`  ✅ 翻译成功!\n${translated}\n`)
-    else res.write('  ❌ 翻译返回空\n')
-  } catch (e) { res.write(`  ❌ ${e.message}\n`) }
-
-  res.end()
+    const srt = await fetchSubsByImdbId(id, CONFIG.subsApiKey)
+    if (!srt) return res.end('no subs found\n')
+    const t = await translateSrt(srt.slice(0, 500), CONFIG.targetLang, CONFIG.llmApiKey, CONFIG.llmApiBase, CONFIG.llmModel)
+    res.end(`ok\n${t}\n`)
+  } catch (e) { res.end(`error: ${e.message}\n`) }
 })
 
 app.use('/', getRouter(builder.getInterface()))
 
-app.listen(PORT, () => {
-  console.log(`AI 字幕插件运行中: ${PUBLIC_URL}/manifest.json`)
-})
+app.listen(PORT, () => console.log(`running: ${PUBLIC_URL}/manifest.json`))
